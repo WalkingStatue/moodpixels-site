@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://moodpixels.dhruvsaija.in/sitemap.xml
