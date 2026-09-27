@@ -57,17 +57,20 @@ const SCHEME_META: Record<Scheme, { icon: typeof Sun; label: string }> = {
  * reading it during render would mismatch during hydration.
  */
 export function ThemeToggle() {
-  const [scheme, setScheme] = useState<Scheme>('system');
-  const [ready, setReady] = useState(false);
+  // One state object, not two: separate `scheme` and `ready` values caused two
+  // re-renders back to back on mount, and a second layout pass with them.
+  const [{ scheme, ready }, setState] = useState<{ scheme: Scheme; ready: boolean }>({
+    scheme: 'system',
+    ready: false,
+  });
 
   useEffect(() => {
-    setScheme(stored());
-    setReady(true);
+    setState({ scheme: stored(), ready: true });
   }, []);
 
   const next = () => {
     const value = SCHEMES[(SCHEMES.indexOf(scheme) + 1) % SCHEMES.length];
-    setScheme(value);
+    setState({ scheme: value, ready: true });
     apply(value);
   };
 

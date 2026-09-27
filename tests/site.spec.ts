@@ -156,6 +156,89 @@ test.describe('theme', () => {
   });
 });
 
+test.describe('colour contrast', () => {
+  /**
+   * Lighthouse only audits whichever scheme the runner happens to be in, so a
+   * contrast bug in the other theme ships unnoticed — which is exactly what
+   * happened with the muted/faint text tokens. This checks both.
+   */
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`small text meets WCAG AA in ${scheme} mode`, async ({ browser }) => {
+      const context = await browser.newContext({ colorScheme: scheme });
+      const page = await context.newPage();
+      await page.goto('/');
+
+      const failures = await page.evaluate(() => {
+        // Chrome serialises color-mix() as `color(srgb 0.97 0.96 0.94 / 0.88)`,
+        // so a regex over the numbers is not enough. Painting into a canvas
+        // normalises every CSS colour syntax to concrete 0-255 RGBA.
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+
+        const toRGBA = (color: string): [number, number, number, number] => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+          return [r, g, b, a / 255];
+        };
+
+        const luminance = ([r, g, b]: number[]) => {
+          const channel = (c: number) => {
+            const s = c / 255;
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+        };
+
+        /**
+         * The effective background behind an element, compositing any
+         * translucent layers (the sticky header is a color-mix with alpha)
+         * over whatever sits behind them.
+         */
+        const backgroundOf = (el: Element | null): number[] => {
+          if (!el) return [255, 255, 255];
+
+          const [r, g, b, a] = toRGBA(getComputedStyle(el).backgroundColor);
+          if (a === 0) return backgroundOf(el.parentElement);
+          if (a >= 1) return [r, g, b];
+
+          const behind = backgroundOf(el.parentElement);
+          return [
+            r * a + behind[0] * (1 - a),
+            g * a + behind[1] * (1 - a),
+            b * a + behind[2] * (1 - a),
+          ];
+        };
+
+        const bad: { text: string; ratio: number }[] = [];
+        for (const el of document.querySelectorAll<HTMLElement>('p, span, a, li, summary, strong')) {
+          const text = el.textContent?.trim();
+          // Only leaf nodes with their own visible text.
+          if (!text || el.children.length > 0 || !el.offsetParent) continue;
+
+          const style = getComputedStyle(el);
+          const size = parseFloat(style.fontSize);
+          const weight = Number(style.fontWeight) || 400;
+          // WCAG "large text" (>=24px, or >=18.66px bold) only needs 3:1.
+          const required = size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5;
+
+          const a = luminance(toRGBA(style.color));
+          const b = luminance(backgroundOf(el));
+          const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
+          if (ratio < required) bad.push({ text: text.slice(0, 45), ratio: Math.round(ratio * 100) / 100 });
+        }
+        return bad;
+      });
+
+      expect(failures, `low-contrast text in ${scheme} mode`).toEqual([]);
+      await context.close();
+    });
+  }
+});
+
 test.describe('accessibility basics', () => {
   test('the skip link is the first focusable element and targets main', async ({ page }) => {
     await page.goto('/');
