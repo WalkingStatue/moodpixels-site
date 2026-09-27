@@ -9,7 +9,7 @@
  * Also emits `sitemap.xml`, `site.webmanifest`, and a `404.html` that GitHub
  * Pages serves for unknown paths.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { renderToString } from 'react-dom/server';
 import { StrictMode } from 'react';
 import { App } from '../src/App';
@@ -109,12 +109,40 @@ function jsonLd(page: PageId) {
   };
 }
 
-function head(page: PageId) {
+/**
+ * `<link rel="preload">` for the fonts the first screen actually paints with.
+ *
+ * Without these the browser cannot discover a font until it has downloaded and
+ * parsed the stylesheet, so the critical path is HTML → CSS → font — three
+ * round trips before text renders in its real face. Preloading starts the font
+ * fetch alongside the CSS instead.
+ *
+ * Only the two faces above the fold are preloaded (the display face used by the
+ * `<h1>`, and the body regular). Preloading more would compete for bandwidth
+ * with the very request it is meant to accelerate. Filenames are content-hashed
+ * by Vite, so they are resolved from the build output rather than hardcoded.
+ */
+async function fontPreloads(): Promise<string> {
+  const wanted = [/^dm-serif-display-latin-400-normal-.*\.woff2$/, /^dm-sans-latin-400-normal-.*\.woff2$/];
+  const files = await readdir(`${DIST}/assets`);
+
+  return wanted
+    .map((pattern) => files.find((f) => pattern.test(f)))
+    .filter((f): f is string => Boolean(f))
+    .map(
+      (f) =>
+        `<link rel="preload" href="/assets/${f}" as="font" type="font/woff2" crossorigin="anonymous" />`,
+    )
+    .join('\n    ');
+}
+
+function head(page: PageId, preloads: string) {
   const meta = pages[page];
   const canonical = `${origin}${meta.path}`;
   const image = `${origin}/og-image.png`;
 
   const tags = [
+    preloads,
     `<meta name="description" content="${escape(meta.description)}" />`,
     googleSiteVerification
       ? `<meta name="google-site-verification" content="${escape(googleSiteVerification)}" />`
@@ -148,6 +176,7 @@ function head(page: PageId) {
 }
 
 const shell = await readFile(`${DIST}/index.html`, 'utf8');
+const preloads = await fontPreloads();
 
 for (const [id, meta] of Object.entries(pages) as [PageId, (typeof pages)[PageId]][]) {
   const markup = renderToString(
@@ -157,7 +186,7 @@ for (const [id, meta] of Object.entries(pages) as [PageId, (typeof pages)[PageId
   );
 
   const html = shell
-    .replace('<!-- page-meta -->', head(id))
+    .replace('<!-- page-meta -->', head(id, preloads))
     .replace(/<title>.*?<\/title>/, `<title>${escape(meta.title)}</title>`)
     .replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
 

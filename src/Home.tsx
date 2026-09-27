@@ -177,17 +177,18 @@ const STEPS = [
 ];
 
 
+/**
+ * A sample of the built-in emotions, spanning the range rather than clustering
+ * on the pleasant end. Deliberately short: each 3D face is roughly 40 SVG nodes,
+ * and this row plus the 372-cell grid is most of the page's DOM weight.
+ */
 const SHOWCASE: EmotionName[] = [
   'excited',
   'happy',
-  'good',
   'calm',
   'normal',
-  'frisky',
   'sleepy',
-  'lowEnergy',
   'anxious',
-  'grumpy',
   'sad',
   'inLove',
 ];
